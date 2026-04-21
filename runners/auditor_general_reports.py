@@ -9,14 +9,13 @@ with a better pattern.
 from polaris.landing import append_result, land_raw
 
 SOURCE_ID = "auditor-general-reports"
-URL = "https://www.oag-bvg.gc.ca/internet/index.htm"
+URL = "https://www.canada.ca/en/auditor-general.html"
 
 def main():
-    r = land_raw(SOURCE_ID, URL, ext="html", basename="gateway",
+    r = land_raw(SOURCE_ID, URL, ext="html", basename="oag_canada_landing",
                  browser_ua=True,
-                 notes=("Phase 1 access test — OAG English gateway (meta-refresh redirect target). "
-                        "Deeper URLs all return a 'not found' page despite HTTP 200. "
-                        "Phase 2 needs Playwright or direct PDF URL discovery."))
+                 notes=("OAG is now served from canada.ca, not oag-bvg.gc.ca. "
+                        "This is the real landing — 48 KB, links to current + historical reports."))
     print(f"[{SOURCE_ID}] {'OK '+str(r.bytes)+'B' if r.ok else 'FAIL '+str(r.error)} -> {r.blob_path}")
     append_result(r)
 

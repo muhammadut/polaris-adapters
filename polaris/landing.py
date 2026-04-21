@@ -201,3 +201,95 @@ def append_result(result: LandingResult, path: str | Path = "phase1-results.json
     path = Path(path)
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(result.to_dict()) + "\n")
+
+
+def land_apify_rendered(
+    source_id: str,
+    url: str,
+    *,
+    basename: str | None = None,
+    wait_ms: int = 3000,
+    notes: str | None = None,
+) -> LandingResult:
+    """Render a URL via Apify headless Chrome and land the rendered HTML.
+
+    Uses the `apify/puppeteer-scraper` actor. Waits `wait_ms` after navigation
+    (default 3s) for client-side JS to settle, then captures the DOM.
+
+    Never raises — errors captured in the result.
+    """
+    from apify_client import ApifyClient
+
+    now = datetime.now(timezone.utc)
+    tested_at = now.isoformat()
+
+    token = os.environ.get("APIFY_TOKEN")
+    if not token:
+        return LandingResult(
+            source_id=source_id, url=url, ok=False, tested_at=tested_at,
+            error="APIFY_TOKEN not set in env",
+            error_type="ConfigError",
+            blocker_type="auth_required",
+            notes=notes,
+        )
+
+    try:
+        client = ApifyClient(token)
+        # Minimal pageFunction: wait, capture DOM, return.
+        page_function = (
+            "async function pageFunction(context) {"
+            "  const { page, request } = context;"
+            f"  await new Promise(r => setTimeout(r, {wait_ms}));"
+            "  const html = await page.content();"
+            "  return { url: request.url, html };"
+            "}"
+        )
+        run = client.actor("apify/puppeteer-scraper").call(
+            run_input={
+                "startUrls": [{"url": url}],
+                "pageFunction": page_function,
+                "maxRequestsPerCrawl": 1,
+                "maxConcurrency": 1,
+                "proxyConfiguration": {"useApifyProxy": True},
+            }
+        )
+        items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+    except Exception as e:
+        return LandingResult(
+            source_id=source_id, url=url, ok=False, tested_at=tested_at,
+            error=str(e), error_type=type(e).__name__,
+            blocker_type="apify_error", notes=notes,
+        )
+
+    if not items or not items[0].get("html"):
+        return LandingResult(
+            source_id=source_id, url=url, ok=False, tested_at=tested_at,
+            error="Apify actor returned no HTML content",
+            error_type="EmptyResult", blocker_type="apify_empty",
+            notes=notes,
+        )
+
+    html_bytes = items[0]["html"].encode("utf-8")
+    blob_path = _build_blob_path(source_id, url, "html", now, basename=basename)
+
+    try:
+        blob_service = _blob_service_client()
+        container = os.environ.get("AZURE_CONTAINER", "polaris-bronze")
+        blob_client = blob_service.get_blob_client(container=container, blob=blob_path)
+        blob_client.upload_blob(html_bytes, overwrite=True)
+    except Exception as e:
+        return LandingResult(
+            source_id=source_id, url=url, ok=False, tested_at=tested_at,
+            bytes=len(html_bytes),
+            error=str(e), error_type=type(e).__name__,
+            blocker_type="storage_error", notes=notes,
+        )
+
+    return LandingResult(
+        source_id=source_id, url=url, ok=True, tested_at=tested_at,
+        http_status=200,
+        content_type="text/html (apify-rendered)",
+        bytes=len(html_bytes),
+        blob_path=blob_path,
+        notes=notes,
+    )
