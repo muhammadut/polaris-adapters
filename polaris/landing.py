@@ -60,16 +60,32 @@ def _blob_service_client() -> BlobServiceClient:
     return BlobServiceClient(account_url=account_url, credential=credential)
 
 
-def _build_blob_path(source_id: str, url: str, ext: str, now: datetime) -> str:
+_GENERIC_BASENAMES = {
+    "xml", "json", "csv", "html", "pdf", "txt", "rss", "atom",
+    "response", "index", "",
+}
+
+
+def _build_blob_path(
+    source_id: str,
+    url: str,
+    ext: str,
+    now: datetime,
+    basename: str | None = None,
+) -> str:
     """polaris-bronze/<source_id>/raw/<YYYY-MM-DD>/<HH-MM-SS>_<basename>.<ext>."""
     date_path = now.strftime("%Y-%m-%d")
     time_part = now.strftime("%H-%M-%S")
 
-    url_basename = Path(url.rstrip("/").split("?")[0]).name or "response"
-    if "." in url_basename:
-        url_basename = url_basename.rsplit(".", 1)[0]
+    if basename is None:
+        url_basename = Path(url.rstrip("/").split("?")[0]).name or ""
+        if "." in url_basename:
+            url_basename = url_basename.rsplit(".", 1)[0]
+        if url_basename.lower() in _GENERIC_BASENAMES:
+            url_basename = source_id.replace("-", "_")
+        basename = url_basename
 
-    filename = f"{time_part}_{url_basename}.{ext}"
+    filename = f"{time_part}_{basename}.{ext}"
     return f"{source_id}/raw/{date_path}/{filename}"
 
 
@@ -83,6 +99,7 @@ def land_raw(
     ext: str = "bin",
     timeout_s: int = 60,
     notes: str | None = None,
+    basename: str | None = None,
 ) -> LandingResult:
     """Fetch a URL and land its raw body in Azure Blob Storage.
 
@@ -132,7 +149,7 @@ def land_raw(
             notes=notes,
         )
 
-    blob_path = _build_blob_path(source_id, url, ext, now)
+    blob_path = _build_blob_path(source_id, url, ext, now, basename=basename)
 
     try:
         client = _blob_service_client()
