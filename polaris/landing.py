@@ -89,6 +89,16 @@ def _build_blob_path(
     return f"{source_id}/raw/{date_path}/{filename}"
 
 
+# Browser-like UA for sources behind WAFs that reject bot-style UAs.
+# Temporary Phase-1 measure. Once partnerships are in place, switch to a
+# proper PolarisBot identifier.
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/125.0.0.0 Safari/537.36"
+)
+
+
 def land_raw(
     source_id: str,
     url: str,
@@ -100,6 +110,7 @@ def land_raw(
     timeout_s: int = 60,
     notes: str | None = None,
     basename: str | None = None,
+    browser_ua: bool = False,
 ) -> LandingResult:
     """Fetch a URL and land its raw body in Azure Blob Storage.
 
@@ -112,12 +123,15 @@ def land_raw(
 
     # Polaris identifies itself on every outbound request. Good citizen + useful
     # for source operators correlating traffic.
-    request_headers = {
-        "User-Agent": (
-            "Polaris/0.1 (Canadian public-data intelligence; "
-            "contact: muhammadut@gmail.com)"
-        ),
-    }
+    if browser_ua:
+        request_headers = {"User-Agent": BROWSER_UA}
+    else:
+        request_headers = {
+            "User-Agent": (
+                "Polaris/0.1 (Canadian public-data intelligence; "
+                "contact: muhammadut@gmail.com)"
+            ),
+        }
     if headers:
         request_headers.update(headers)
 
